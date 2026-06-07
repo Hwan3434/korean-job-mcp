@@ -1,0 +1,24 @@
+[project]
+name = "korean-job-mcp"
+version = "0.1.0"
+description = "🇰🇷 한국 채용 정보 통합 MCP 서버 - 원티드, zighang, 카카오, 네이버, 삼성 등"
+readme = "README.md"
+requires-python = ">=3.12"
+dependencies = [
+    "beautifulsoup4>=4.14.3",
+    "fastmcp>=3.4.2",
+    "hatchling>=1.30.1",
+    "httpx>=0.28.1",
+    "playwright>=1.60.0",
+    "pydantic>=2.13.4",
+]
+
+[project.scripts]
+korean-job-mcp = "korean_job_mcp.server:mcp.run"
+
+[build-system]
+requires = ["hatchling"]
+build-backend = "hatchling.build"
+
+[tool.hatch.build.targets.wheel]
+packages = ["src/korean_job_mcp"]
