@@ -184,6 +184,40 @@ async def search_all_jobs(
     }
 
 
+@mcp.tool(description="토스 채용공고를 검색합니다 (토스뱅크, 토스증권, 토스페이먼츠, 토스플레이스 포함).")
+async def search_toss_jobs(
+    keyword: Annotated[Optional[str], "검색 키워드"] = None,
+    subsidiary: Annotated[Optional[str], "계열사 (토스/토스뱅크/토스증권/토스페이먼츠/토스플레이스/토스씨엑스)"] = None,
+    limit: Annotated[int, "결과 개수"] = 20,
+) -> dict:
+    """토스 채용공고를 검색합니다."""
+    from .scrapers import toss
+    result = await toss.search_jobs(keyword=keyword, subsidiary=subsidiary, limit=limit)
+    return _format_result(result)
+
+
+@mcp.tool(description="쿠팡 채용공고를 검색합니다. Greenhouse 공개 API 활용 (570개+).")
+async def search_coupang_jobs(
+    keyword: Annotated[Optional[str], "검색 키워드"] = None,
+    limit: Annotated[int, "결과 개수"] = 20,
+) -> dict:
+    """쿠팡 채용공고를 검색합니다."""
+    from .scrapers import greenhouse
+    result = await greenhouse.search_coupang(keyword=keyword, limit=limit)
+    return _format_result(result)
+
+
+@mcp.tool(description="당근마켓 채용공고를 검색합니다. Greenhouse 공개 API 활용.")
+async def search_daangn_jobs(
+    keyword: Annotated[Optional[str], "검색 키워드"] = None,
+    limit: Annotated[int, "결과 개수"] = 20,
+) -> dict:
+    """당근마켓 채용공고를 검색합니다."""
+    from .scrapers import greenhouse
+    result = await greenhouse.search_daangn(keyword=keyword, limit=limit)
+    return _format_result(result)
+
+
 @mcp.tool(description="지원하는 기업 목록을 조회합니다.")
 async def list_supported_companies() -> dict:
     """한국 채용 MCP가 지원하는 기업 목록을 반환합니다."""

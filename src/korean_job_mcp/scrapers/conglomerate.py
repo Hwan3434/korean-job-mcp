@@ -10,57 +10,74 @@ COMPANIES: dict[str, dict] = {
     "lg": {
         "name": "LG전자",
         "url": "https://recruit.lg.com",
-        "api": "https://recruit.lg.com/api/jobs",
+        "api": None,
+        "type": "html",
     },
     "hyundai": {
         "name": "현대자동차",
         "url": "https://talent.hyundai.com",
-        "api": "https://talent.hyundai.com/api/v1/jobs",
+        "api": None,
+        "type": "html",
     },
     "sk": {
         "name": "SK하이닉스",
         "url": "https://careers.skhynix.com",
-        "api": "https://careers.skhynix.com/api/jobs",
+        "api": None,
+        "type": "html",
     },
     "coupang": {
         "name": "쿠팡",
         "url": "https://www.coupang.jobs/ko",
-        "api": "https://www.coupang.jobs/api/jobs",
+        "api": "greenhouse:coupang",
+        "type": "greenhouse",
     },
     "line": {
         "name": "라인",
-        "url": "https://linecorp.com/ko/career/",
-        "api": None,
+        "url": "https://careers.linecorp.com/ko/jobs",
+        "api": "gatsby:https://careers.linecorp.com/page-data/ko/jobs/page-data.json:allStrapiJobs",
+        "type": "gatsby",
     },
     "krafton": {
         "name": "크래프톤",
-        "url": "https://careers.krafton.com",
-        "api": "https://careers.krafton.com/api/jobs",
+        "url": "https://careers.krafton.com/jobs/",
+        "api": None,
+        "type": "html",
     },
     "ncsoft": {
         "name": "엔씨소프트",
         "url": "https://careers.ncsoft.com",
         "api": None,
+        "type": "html",
     },
     "nexon": {
         "name": "넥슨",
         "url": "https://career.nexon.com",
         "api": None,
+        "type": "html",
     },
     "kakaobank": {
         "name": "카카오뱅크",
         "url": "https://kakaobank.career.greetinghr.com/",
         "api": None,
+        "type": "html",
     },
     "toss": {
         "name": "토스",
-        "url": "https://toss.im/career",
-        "api": "https://toss.im/api/career/jobs",
+        "url": "https://toss.im/career/jobs",
+        "api": "toss",
+        "type": "toss",
+    },
+    "daangn": {
+        "name": "당근마켓",
+        "url": "https://about.daangn.com/jobs/",
+        "api": "greenhouse:daangn",
+        "type": "greenhouse",
     },
     "당근": {
         "name": "당근마켓",
         "url": "https://about.daangn.com/jobs/",
-        "api": "https://about.daangn.com/api/jobs",
+        "api": "greenhouse:daangn",
+        "type": "greenhouse",
     },
 }
 
@@ -86,15 +103,79 @@ async def search_company_jobs(
         return SearchResult(total=0, jobs=[], source=company_key, keyword=keyword)
 
     jobs = []
-    async with httpx.AsyncClient(headers={**HEADERS, "Referer": company["url"]}, timeout=20, follow_redirects=True) as client:
-        if company.get("api"):
-            jobs = await _try_api(client, company, keyword, limit)
-        if not jobs:
-            jobs = await _scrape_company(client, company, keyword, limit)
+    company_type = company.get("type", "html")
+
+    if company_type == "greenhouse":
+        from .greenhouse import search_jobs as gh_search
+        token = company["api"].replace("greenhouse:", "")
+        r = await gh_search(token, keyword=keyword, limit=limit)
+        r.source = company_key
+        cache.set(cache_key, r)
+        return r
+    elif company_type == "toss":
+        from .toss import search_jobs as toss_search
+        r = await toss_search(keyword=keyword, limit=limit)
+        r.source = company_key
+        cache.set(cache_key, r)
+        return r
+    elif company_type == "gatsby":
+        jobs = await _scrape_gatsby(company, keyword, limit)
+    else:
+        async with httpx.AsyncClient(headers={**HEADERS, "Referer": company["url"]}, timeout=20, follow_redirects=True) as client:
+            if company.get("api") and not company["api"].startswith("greenhouse:"):
+                jobs = await _try_api(client, company, keyword, limit)
+            if not jobs:
+                jobs = await _scrape_company(client, company, keyword, limit)
 
     result = SearchResult(total=len(jobs), jobs=jobs, source=company_key, keyword=keyword)
     cache.set(cache_key, result)
     return result
+
+
+async def _scrape_gatsby(company: dict, keyword: Optional[str], limit: int) -> list[JobListing]:
+    """Gatsby page-data.json에서 채용 정보 파싱 (라인 등)."""
+    api_config = company.get("api", "")
+    parts = api_config.split(":")
+    if len(parts) < 3:
+        return []
+
+    gatsby_url = parts[1] + ":" + parts[2]  # https://... 재조합
+    data_key = parts[3] if len(parts) > 3 else parts[-1]
+
+    async with httpx.AsyncClient(headers=HEADERS, timeout=15, follow_redirects=True) as c:
+        try:
+            r = await c.get(gatsby_url)
+            data = r.json().get("result", {}).get("data", {})
+            section = data.get(data_key, {})
+            edges = section.get("edges", section.get("nodes", []))
+            jobs = []
+            for edge in edges[:limit]:
+                node = edge.get("node", edge) if isinstance(edge, dict) and "node" in edge else edge
+                if not isinstance(node, dict):
+                    continue
+                if not node.get("job_unit") and not node.get("title"):
+                    continue
+                title = node.get("title", node.get("name", ""))
+                if keyword and keyword.lower() not in title.lower():
+                    continue
+                job_id = str(node.get("strapiId", node.get("id", "")))
+                cities = node.get("cities", []) or []
+                location = cities[0].get("name", "") if cities else ""
+                jobs.append(
+                    JobListing(
+                        id=job_id,
+                        title=title,
+                        company=company["name"],
+                        location=location,
+                        url=f"{company['url']}",
+                        posted_date=node.get("start_date", ""),
+                        deadline=node.get("end_date", ""),
+                        source=company["name"],
+                    )
+                )
+            return jobs
+        except Exception:
+            return []
 
 
 async def list_companies() -> dict[str, str]:
