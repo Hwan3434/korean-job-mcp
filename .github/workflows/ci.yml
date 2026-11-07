@@ -27,3 +27,5 @@ jobs:
           for t in tools:
               print(f'  - {t.name}')
           "
+      - name: Run tests
+        run: uv run pytest -v
